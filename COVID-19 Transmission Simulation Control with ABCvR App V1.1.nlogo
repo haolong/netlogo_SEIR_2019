@@ -1,10 +1,13 @@
 turtles-own[
   state ;;0表示susceptible，1表示Exposed，2表示infectious，3表示recovered
-  initial-xcor ;;turtle的家的位置
-  initial-ycor
-  exposed-start
+  initialXcor ;;turtle的家的位置
+  initialYcor
+  exposedStart
+  receivedStart
+  receivedSELF? ;;是否被自我隔离
   received? ;;是否被收治
   cured? ;;是否被治愈
+  patientZero? ;;是否为传染源
 ]
 
 globals[remain-hospital-segregation-area]
@@ -15,14 +18,17 @@ to setup
   create-turtles population[
     set shape "circle"
     ;;设置初始分布位置
-    set initial-xcor (random-xcor * 0.95)
-    set initial-ycor (random-ycor * 0.95)
-    setxy initial-xcor initial-ycor
+    set initialXcor (random-xcor * 0.95)
+    set initialYcor (random-ycor * 0.95)
+    setxy initialXcor initialYcor
+    set receivedSELF? 0
     set received? 0
+    set patientZero? 0
     become-susceptible
   ]
   ask n-of initial-infectious-num turtles[
     become-exposed ;;开局设置潜伏患者
+	set patientZero? 1 ;;标记为0号病人，即传染源
   ]
   set remain-hospital-segregation-area hospital-patient-segregation-area
 end
@@ -32,6 +38,7 @@ to go
     move-turltes ;;外出活动
     spread ;;接触传染
     transform ;;潜伏者转化为感染者
+	ABCvR_alert ;;得到风险提示，采取隔离
   ]
   received-and-cured ;;收治患者
   tick
@@ -39,23 +46,25 @@ end
 
 to received-and-cured
   let current-time ticks
-  if current-time >= (receive-cure-response-time + latent-time)[
+  if current-time >= (receive-cure-response-time + latent-time)[ ;;出现症状到确诊到医院收治的时间
       ask n-of remain-hospital-segregation-area patches [
-      if receive-rate >= random-float 1[ ;;receive-rate影响收治效率
+      ;;if receive-rate >= random-float 1[ ;;receive-rate影响收治效率
         let agents turtles-here
         if count agents > 0[
-          ask one-of agents[
+          ask agents[
+          ;;ask one-of agents[
             if state = 2 and received? = 0 [
               ;;判断医院是否还有剩余床位
                 if remain-hospital-segregation-area > 0 [
                   set remain-hospital-segregation-area (remain-hospital-segregation-area - 1)
                   set received? 1 ;;收治感染者
+                  set receivedStart ticks ;;收治感染者起始时间
                   recovery
                ]
             ]
           ]
         ]
-       ]
+       ;;]
       ]
 
     let has-infected-not-cure turtles with [state = 2 and received? = 1 and cured? = 0]
@@ -77,11 +86,11 @@ to move-turltes
   if random-float 1 < 0.2[
     set heading random 360
   ]
-  ifelse (distancexy initial-xcor initial-ycor) < human-flow-range
+  ifelse (distancexy initialXcor initialYcor) < human-flow-range
   [
     fd 1
   ][
-    facexy initial-xcor initial-ycor ;;让turtle朝向家的位置
+    facexy initialXcor initialYcor ;;让turtle朝向家的位置
     fd 1
     ]
   ]
@@ -90,24 +99,37 @@ end
 to spread
   let touch-agents other turtles-here ;;接触其他人列表
   if count touch-agents >= 1[
-    if (state = 1 or state = 2) and received? = 0 [ ;;潜伏者和感染者都具备感染性,被隔离的患者不再感染他人
+    if (state = 1 or state = 2) and receivedSELF? = 0  and received? = 0 [ ;;潜伏者和感染者都具备感染性,被隔离的患者不再感染他人
       ask touch-agents with [state = 0][infect-turtles]
     ]
   ]
 end
 
-to transform
+to ABCvR_alert ;;潜伏期内，收到风险提示
+  if ABCvR-SWITCH? and state = 1 and receivedSELF? = 0 and patientZero? = 0 [ ;;zero号病人因为没有数据，无法获得风险提示
+    let current-ticks ticks
+	if current-ticks - exposedStart >= alert-time [
+      become-alerted
+    ]
+  ]
+end
+
+to transform ;;潜伏期前后，从被感染转化为出现症状
   if state = 1[
     let current-ticks ticks
-    if current-ticks - exposed-start >= latent-time[
-      if transform-rate >= random-float 1 [become-infected]
+    if current-ticks - exposedStart >= latent-time [
+      if transformation-rate >= random-float 1 [become-infected]
     ]
   ]
 end
 
 to recovery
-  if state = 2 and recovery-rate >= random-float 1 [
-    become-recovered
+  let current-ticks ticks 
+  if current-ticks - receivedStart >= recoveringTime[ ;;21天即3周
+	if state = 2 and recovery-rate >= random-float 1 [
+	  become-recovered
+	  set remain-hospital-segregation-area (remain-hospital-segregation-area + 1) ;;释放医院床位
+	]
   ]
 end
 
@@ -122,15 +144,22 @@ to become-susceptible
   set color green
 end
 
-to become-exposed
+to become-exposed ;;被感染，开始潜伏期
   set state 1
   set color yellow
-  set exposed-start ticks
+  set exposedStart ticks
 end
 
-to become-infected
+to become-alerted ;;收到风险提示，开始自我隔离
+  set color pink
+  set receivedSELF? 1;;被自我隔离
+end
+
+to become-infected ;;潜伏期结束，开始出现症状
   set state 2
-  set color red
+  if receivedSELF? = 0 [
+	set color red
+  ]
   set cured? 0
 end
 
@@ -141,10 +170,10 @@ to become-recovered
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
-249
+220
 10
 720
-482
+510
 -1
 -1
 4.5842
@@ -168,10 +197,10 @@ ticks
 30.0
 
 BUTTON
-16
-39
-82
-72
+10
+10
+90
+40
 NIL
 setup
 NIL
@@ -184,131 +213,11 @@ NIL
 NIL
 1
 
-SLIDER
-10
-100
-190
-133
-population
-population
-1000
-10000
-1000.0
-1000
-1
-NIL
-HORIZONTAL
-
-SLIDER
-10
-146
-192
-179
-hospital-patient-segregation-area
-hospital-patient-segregation-area
-0
-1000
-1000.0
-10
-1
-NIL
-HORIZONTAL
-
-SLIDER
-12
-193
-189
-226
-human-flow-range
-human-flow-range
-0
-50
-2.0
-1
-1
-NIL
-HORIZONTAL
-
-SLIDER
-10
-240
-189
-273
-infection-rate
-infection-rate
-0
-1
-0.8
-0.01
-1
-NIL
-HORIZONTAL
-
-SLIDER
-10
-284
-189
-317
-transform-rate
-transform-rate
-0
-1
-0.8
-0.01
-1
-NIL
-HORIZONTAL
-
-SLIDER
-10
-326
-189
-359
-recovery-rate
-recovery-rate
-0
-1
-0.2
-0.01
-1
-NIL
-HORIZONTAL
-
-SLIDER
-8
-369
-188
-402
-initial-infectious-num
-initial-infectious-num
-1
-50
-1.0
-1
-1
-NIL
-HORIZONTAL
-
-SLIDER
-7
-410
-190
-443
-latent-time
-latent-time
-0
-1000
-100.0
-100
-1
-NIL
-HORIZONTAL
-
 BUTTON
 110
-39
-173
-72
+10
+190
+40
 NIL
 go
 T
@@ -322,81 +231,243 @@ NIL
 1
 
 SLIDER
-7
-449
-190
-482
-receive-cure-response-time
-receive-cure-response-time
-0
-500
-50.0
+10
+60
+200
+100
+population-size
+population
+1000
+10000
+1000.0
+1000
+1
+NIL
+HORIZONTAL
+
+SLIDER
+10
+110
+200
+150
+initial-infectious-num
+initial-infectious-num
+1
+50
+10.0
 1
 1
 NIL
 HORIZONTAL
 
+SLIDER
+10
+160
+200
+200
+StayHome<>GoWork-index
+human-flow-range
+0
+50
+10.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+10
+210
+200
+250
+infection-rate
+infection-rate
+0
+1
+0.5
+0.01
+1
+NIL
+HORIZONTAL
+
+SLIDER
+10
+260
+200
+300
+transformation-rate
+transformation-rate
+0
+1
+0.8
+0.01
+1
+NIL
+HORIZONTAL
+
+SLIDER
+10
+310
+200
+350
+recovery-rate
+recovery-rate
+0
+1
+0.8
+0.01
+1
+NIL
+HORIZONTAL
+
+SLIDER
+10
+360
+200
+400
+hospital-beds-total
+hospital-patient-segregation-area
+0
+1000
+100.0
+10
+1
+NIL
+HORIZONTAL
+
+SLIDER
+10
+410
+200
+450
+incubation-time(1/10 day)
+latent-time
+0
+300 
+50.0 
+10
+1
+NIL
+HORIZONTAL
+
+SLIDER
+10
+460
+200
+500
+symptom-hospitalized-time
+receive-cure-response-time
+0
+140
+50.0
+10
+1
+NIL
+HORIZONTAL
+
+SLIDER
+10
+510
+200
+550
+hospitalized-recover-time
+recoveringTime
+50
+420
+210.0
+10
+1
+NIL
+HORIZONTAL
+
+SLIDER
+340
+500
+685
+550
+ABCvR alert-time(1/10 day; typical:10-40; alerted:pink)
+alert-time
+0
+140
+30.0
+10
+1
+NIL
+HORIZONTAL
+
+SWITCH
+220
+500
+335
+550
+ABCvR-ON/OFF
+ABCvR-SWITCH?
+1
+1
+-1000
+
+
 MONITOR
-741
-20
-837
-65
-susceptible(%)
+700
+10
+780
+60
+R_susceptible
 count turtles with [state = 0] / population
 17
 1
 11
 
 MONITOR
-840
-20
-914
-65
-exposed(%)
+785
+10
+865
+60
+R_exposed
 count turtles with [state = 1] / population
 17
 1
 11
 
 MONITOR
-919
-20
-1013
-65
-infectious(%)
+870
+10
+950
+60
+R_infectious
 count turtles with [state = 2] / population
 17
 1
 11
 
 MONITOR
-1016
-19
-1105
-64
-recoverd(%)
+955
+10
+1035
+60
+R_recoverd
 count turtles with [state = 3] / population
 17
 1
 11
 
 MONITOR
-1111
-19
-1179
-64
-NIL
+1040
+10
+1120
+60
+Vancant_beds
 remain-hospital-segregation-area
 17
 1
 11
 
 PLOT
-741
-71
-1177
-313
-SEIR
+700
+70
+1120
+550
+SEIR Simulation Model Plot (1/10 day per tick)
 ticks
 population-num
 0.0
@@ -412,20 +483,6 @@ PENS
 "infectious" 1.0 0 -2674135 true "" "plot count turtles with [state = 2]"
 "recoverd" 1.0 0 -13345367 true "" "plot count turtles with [state = 3]"
 
-SLIDER
-7
-489
-190
-522
-receive-rate
-receive-rate
-0
-1
-0.7
-0.01
-1
-NIL
-HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
@@ -462,7 +519,9 @@ HORIZONTAL
 
 ## CREDITS AND REFERENCES
 
-(a reference to the model's URL on the web if it has one, as well as any other necessary credits, citations, and links)
+By Haolong (hihaolong@gmail.com  https://www.linkedin.com/in/hihaolong)    
+Ref: dpqb from CSDN Blog https://blog.csdn.net/sinat_35988648/article/details/104398020
+
 @#$#@#$#@
 default
 true
@@ -636,7 +695,7 @@ false
 Polygon -7500403 true true 150 15 15 120 60 285 240 285 285 120
 
 person
-false
+true
 0
 Circle -7500403 true true 110 5 80
 Polygon -7500403 true true 105 90 120 195 90 285 105 300 135 300 150 225 165 300 195 300 210 285 180 195 195 90
